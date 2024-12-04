@@ -4,16 +4,34 @@ using UnityEngine;
 
 public class ExplorationSceneManager : MonoBehaviour
 {
-    public GameObject enemy; // Reference to the enemy GameObject in the 3D scene
+    public GameObject[] enemies; // Array of all enemies in the 3D scene
 
     void Start()
     {
-        // Check if the enemy was defeated
-        if (GameManager.Instance != null && GameManager.Instance.enemyDefeated)
+        if (GameManager.Instance == null)
+        {
+            Debug.LogError("GameManager instance is null!");
+            return;
+        }
+
+        foreach (GameObject enemy in enemies)
         {
             if (enemy != null)
             {
-                Destroy(enemy); // Destroy the enemy in the 3D scene
+                string enemyID = enemy.GetComponent<EnemyID>()?.enemyID;
+
+                if (enemyID == null)
+                {
+                    Debug.LogError($"Enemy {enemy.name} is missing an EnemyID component!");
+                    continue;
+                }
+
+                // Check if the enemy is defeated
+                if (GameManager.Instance.IsEnemyDefeated(enemyID))
+                {
+                    Debug.Log($"Destroying defeated enemy in 3D world: {enemy.name}");
+                    Destroy(enemy);
+                }
             }
         }
     }

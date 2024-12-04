@@ -1,66 +1,95 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 public class CombatManager : MonoBehaviour
 {
-    public GameObject player;
-    public GameObject enemy;
+    public GameObject player; // Reference to the player GameObject
+    public GameObject enemy; // Local reference to the instantiated enemy
+    public Transform spawnPoint; // Where the enemy should spawn in the combat scene
 
-    public CombatLog combatLog;
-    public GameObject floatingTextPrefab;
+    public CombatLog combatLog; // Reference to a script managing combat log UI
+    public GameObject floatingTextPrefab; // Prefab for showing floating damage numbers
 
-    public string explorationSceneName = "3DScene"; // Name of the 3D exploration scene
+    public string explorationSceneName = "3DScene"; // Name of the exploration scene
+
     private bool playerTurn = true;
     private bool combatEnded = false;
 
     void Start()
     {
-        combatLog.UpdateLog("Combat Started!");
+        // Ensure the GameManager and enemy prefab exist
+        if (GameManager.Instance != null)
+        {
+            if (GameManager.Instance.enemyPrefab != null)
+            {
+                // Place the cloned enemy at the spawn point
+                enemy = GameManager.Instance.enemyPrefab;
+                enemy.transform.position = spawnPoint.position;
+                enemy.transform.rotation = Quaternion.identity;
+
+                Debug.Log($"Instantiated enemy: {enemy.name} at {spawnPoint.position}");
+            }
+            else
+            {
+                Debug.LogError("No enemy prefab assigned in GameManager.");
+            }
+        }
+        else
+        {
+            Debug.LogError("GameManager instance is null in CombatManager.");
+        }
     }
 
     void Update()
     {
-        if (combatEnded)
-        {
-            return; // Stop further execution if combat has ended
-        }
+        if (combatEnded) return;
 
-        if (playerTurn)
+        if (playerTurn && Input.GetKeyDown(KeyCode.Space))
         {
-            if (Input.GetKeyDown(KeyCode.Space)) // Wait for the player to press space
-            {
-                StartCoroutine(PlayerAttack()); // Start the player attack coroutine
-            }
+            StartCoroutine(PlayerAttack());
         }
     }
 
     IEnumerator PlayerAttack()
     {
-        if (enemy != null)
+        // Validate player and enemy references
+        if (player == null || player.GetComponent<PlayerHealth>() == null)
         {
-            int playerAttack = player.GetComponent<PlayerHealth>().attack; // Get player's attack value
-            combatLog.UpdateLog($"Player attacks Enemy for {playerAttack} damage!");
+            Debug.LogError("Player or PlayerHealth is null!");
+            yield break;
+        }
 
-            // Visual effects
-            enemy.GetComponent<FlashEffect>().Flash();
-            SpawnFloatingText(enemy.transform.position, playerAttack);
+        if (enemy == null || enemy.GetComponent<EnemyHealth>() == null)
+        {
+            Debug.LogError("Enemy or EnemyHealth is null!");
+            yield break;
+        }
 
-            enemy.GetComponent<EnemyHealth>().TakeDamage(playerAttack); // Deal damage to the enemy
+        if (enemy.GetComponent<FlashEffect>() == null)
+        {
+            Debug.LogError("FlashEffect is missing on the enemy!");
+            yield break;
+        }
 
-            yield return new WaitForSeconds(1f); // Wait for the attack to finish
+        // Execute player attack
+        int playerAttack = player.GetComponent<PlayerHealth>().attack;
+        combatLog.UpdateLog($"Player attacks Enemy for {playerAttack} damage!");
+        enemy.GetComponent<FlashEffect>().Flash();
+        SpawnFloatingText(enemy.transform.position, playerAttack);
+        enemy.GetComponent<EnemyHealth>().TakeDamage(playerAttack);
 
-            if (!IsCombatOver())
-            {
-                playerTurn = false; // Switch to enemy turn if combat isn't over
-                StartCoroutine(EnemyTurn());
-            }
-            else
-            {
-                combatEnded = true; // End combat if necessary
-                HandleEnemyDefeat(); // Transition back to 3D scene
-            }
+        yield return new WaitForSeconds(1f);
+
+        if (!IsCombatOver())
+        {
+            playerTurn = false;
+            StartCoroutine(EnemyTurn());
+        }
+        else
+        {
+            combatEnded = true;
+            HandleEnemyDefeat();
         }
     }
 
@@ -68,27 +97,24 @@ public class CombatManager : MonoBehaviour
     {
         if (enemy != null && enemy.GetComponent<EnemyHealth>().health > 0)
         {
-            if (player != null)
+            if (player != null && player.GetComponent<PlayerHealth>() != null)
             {
-                int enemyAttack = enemy.GetComponent<EnemyHealth>().attack; // Get enemy's attack value
+                int enemyAttack = enemy.GetComponent<EnemyHealth>().attack;
                 combatLog.UpdateLog($"Enemy attacks Player for {enemyAttack} damage!");
-
-                // Visual effects
                 player.GetComponent<FlashEffect>().Flash();
                 SpawnFloatingText(player.transform.position, enemyAttack);
-
-                player.GetComponent<PlayerHealth>().TakeDamage(enemyAttack); // Deal damage to the player
+                player.GetComponent<PlayerHealth>().TakeDamage(enemyAttack);
             }
 
-            yield return new WaitForSeconds(1f); // Wait for the enemy's attack to finish
+            yield return new WaitForSeconds(1f);
 
             if (!IsCombatOver())
             {
-                playerTurn = true; // Switch back to player's turn
+                playerTurn = true;
             }
             else
             {
-                combatEnded = true; // End combat if necessary
+                combatEnded = true;
             }
         }
     }
@@ -111,24 +137,74 @@ public class CombatManager : MonoBehaviour
     }
 
     void HandleEnemyDefeat()
+{
+    if (enemy == null)
     {
-        // Mark the enemy as defeated in the GameManager
-        if (GameManager.Instance != null)
-        {
-            GameManager.Instance.enemyDefeated = true;    
-        }
-
-        // Return to the 3D exploration scene
-        combatLog.UpdateLog("Returning to the exploration scene...");
-        SceneManager.LoadScene(explorationSceneName);
+        Debug.LogError("Enemy is null in HandleEnemyDefeat.");
+        return;
     }
+
+    if (GameManager.Instance == null)
+    {
+        Debug.LogError("GameManager instance is null.");
+        return;
+    }
+
+    // Mark the enemy as defeated
+    EnemyID enemyIDComponent = enemy.GetComponent<EnemyID>();
+    if (enemyIDComponent == null)
+    {
+        Debug.LogError("EnemyID component is missing on the enemy GameObject.");
+        return;
+    }
+
+    string enemyID = enemyIDComponent.enemyID;
+    GameManager.Instance.MarkEnemyAsDefeated(enemyID);
+
+    // Destroy the original enemy in the 3D world
+    if (GameManager.Instance.originalEnemy != null)
+{
+    Debug.Log($"Forcefully destroying original enemy: {GameManager.Instance.originalEnemy.name}");
+    
+    // Destroy all children and components
+    foreach (Transform child in GameManager.Instance.originalEnemy.transform)
+    {
+        DestroyImmediate(child.gameObject);
+    }
+
+    // Destroy the main GameObject
+    DestroyImmediate(GameManager.Instance.originalEnemy);
+    GameManager.Instance.originalEnemy = null; // Clear the reference
+}
+    else
+    {
+        Debug.LogError("GameManager.Instance.originalEnemy is null. Could not destroy original enemy.");
+    }
+
+    // Return to the exploration scene
+    combatLog.UpdateLog("Returning to the exploration scene...");
+    SceneManager.LoadScene(explorationSceneName);
+}
+
 
     void SpawnFloatingText(Vector3 position, int damage)
     {
         if (floatingTextPrefab != null)
         {
             GameObject floatingText = Instantiate(floatingTextPrefab, position + Vector3.up, Quaternion.identity);
-            floatingText.GetComponent<TextMesh>().text = damage.ToString();
+            TextMesh textMesh = floatingText.GetComponent<TextMesh>();
+            if (textMesh != null)
+            {
+                textMesh.text = damage.ToString();
+            }
+            else
+            {
+                Debug.LogError("FloatingTextPrefab is missing a TextMesh component!");
+            }
+        }
+        else
+        {
+            Debug.LogError("FloatingTextPrefab is not assigned in the CombatManager.");
         }
     }
 }
